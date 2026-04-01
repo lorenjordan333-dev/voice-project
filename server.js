@@ -200,18 +200,31 @@ app.post("/voice", (req, res) => {
 
   res.send(`
     <Response>
+      <Say>Connecting you now</Say>
+      <Pause length="1"/>
       <Connect>
         <Stream url="wss://voice-project-production-8fea.up.railway.app/stream" />
       </Connect>
     </Response>
-  `);
+    `);
+
+  
 });
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/stream" });
 
+server.on("upgrade", (request, socket, head) => {
+  if (request.url === "/stream") {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  }
+});
+
 wss.on("connection", (ws) => {
   console.log("📞 Twilio connected");
+
 
   let systemState = {
     service: null,
@@ -286,6 +299,25 @@ wss.on("connection", (ws) => {
   let pendingAssistantTimeout = null;
   let aiResponseInFlight = false;
   const voiceController = new VoiceController();
+
+  /** First audio after session.update: no delay, no validate — keeps Twilio from dropping the call. */
+  function sendImmediateAssistantResponse(nextText) {
+    if (openaiWs.readyState !== WebSocket.OPEN) return;
+    if (pendingAssistantTimeout) clearTimeout(pendingAssistantTimeout);
+
+    voiceController.stateManager.setState("SPEAKING");
+    voiceController.currentlySpeaking = true;
+    aiResponseInFlight = true;
+    voiceController.responseController.markSent(nextText);
+
+    openaiWs.send(JSON.stringify({
+      type: "response.create",
+      response: {
+        modalities: ["audio"],
+        instructions: nextText,
+      },
+    }));
+  }
 
   function scheduleAssistantResponse(forcedText) {
     if (pendingAssistantTimeout) clearTimeout(pendingAssistantTimeout);
@@ -406,8 +438,9 @@ Do not end the conversation unless the customer says goodbye.`,
       },
     }));
 
-    voiceController.stateManager.setState("THINKING");
-    scheduleAssistantResponse("Locksmith services, hi, this is Kelly, how can I help?");
+    sendImmediateAssistantResponse(
+      "Locksmith services, hi, this is Kelly, how can I help?"
+    );
   });
 
   ws.on("message", (msg) => {
