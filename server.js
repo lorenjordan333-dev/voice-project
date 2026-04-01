@@ -284,6 +284,9 @@ wss.on("connection", (ws) => {
     }
   );
 
+  let openaiReady = false;
+  let audioBuffer = [];
+
   let streamSid = null;
   let aiSpeaking = false;
   let hasAudio = false;
@@ -435,25 +438,68 @@ Do not end the conversation unless the customer says goodbye.`,
     sendImmediateAssistantResponse(
       "Locksmith services, hi, this is Kelly, how can I help?"
     );
+
+    openaiReady = true;
+    console.log("OpenAI ready, flushing buffer");
+    for (const payload of audioBuffer) {
+      openaiWs.send(
+        JSON.stringify({
+          type: "input_audio_buffer.append",
+          audio: payload,
+        })
+      );
+    }
+    audioBuffer = [];
   });
 
   ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
-
-    if (data.event === "start") {
-      streamSid = data.start.streamSid;
+    let data;
+    try {
+      data = JSON.parse(typeof msg === "string" ? msg : msg.toString());
+    } catch (e) {
+      console.error("Twilio WS: invalid JSON message", e.message);
+      return;
     }
 
-    if (data.event === "media") {
-      const payload = data.media.payload;
+    const event = data.event;
 
+    if (event === "start") {
+      console.log("Stream started");
+      if (data.start && data.start.streamSid) {
+        streamSid = data.start.streamSid;
+      }
+      if (!openaiReady) {
+        console.log("Waiting for OpenAI...");
+      }
+      return;
+    }
+
+    if (event === "stop") {
+      console.log("Stream stopped");
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = null;
+      return;
+    }
+
+    if (event === "media") {
+      const payload = data.media && data.media.payload;
       if (!payload) return;
+
+      if (!openaiReady) {
+        audioBuffer.push(payload);
+        console.log("Buffering audio...");
+        return;
+      }
+
+      if (openaiWs.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      console.log("Audio chunk received");
 
       if (payload.length > 200) {
         hasAudio = true;
       }
-
-      if (openaiWs.readyState !== WebSocket.OPEN) return;
 
       if (aiSpeaking && payload.length > 500) {
         openaiWs.send(JSON.stringify({ type: "response.cancel" }));
@@ -463,10 +509,12 @@ Do not end the conversation unless the customer says goodbye.`,
         voiceController.stopAISpeech();
       }
 
-      openaiWs.send(JSON.stringify({
-        type: "input_audio_buffer.append",
-        audio: payload,
-      }));
+      openaiWs.send(
+        JSON.stringify({
+          type: "input_audio_buffer.append",
+          audio: payload,
+        })
+      );
 
       if (silenceTimer) clearTimeout(silenceTimer);
 
@@ -474,10 +522,10 @@ Do not end the conversation unless the customer says goodbye.`,
         if (!hasAudio) return;
         if (Date.now() - lastAiEndTime < 800) return;
 
-        if (openaiWs.readyState !== WebSocket.OPEN) return;
+        if (!openaiReady || openaiWs.readyState !== WebSocket.OPEN) return;
 
         openaiWs.send(JSON.stringify({
-          type: "input_audio_buffer.commit"
+          type: "input_audio_buffer.commit",
         }));
 
         voiceController.stateManager.setState("THINKING");
@@ -564,6 +612,7 @@ Do not end the conversation unless the customer says goodbye.`,
   });
 
   openaiWs.on("close", () => {
+    openaiReady = false;
     ws.close();
   });
 });
