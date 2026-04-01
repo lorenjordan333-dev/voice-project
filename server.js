@@ -214,13 +214,7 @@ app.post("/voice", (req, res) => {
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/stream" });
 
-server.on("upgrade", (request, socket, head) => {
-  if (request.url === "/stream") {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
-  }
-});
+
 
 wss.on("connection", (ws) => {
   console.log("📞 Twilio connected");
