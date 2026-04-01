@@ -195,6 +195,7 @@ app.get("/voice", (req, res) => {
 });
 
 app.post("/voice", (req, res) => {
+  console.log("🔥 TWILIO HIT /voice");
   res.set("Content-Type", "text/xml");
 
   res.send(`
