@@ -200,7 +200,7 @@ app.post("/voice", (req, res) => {
   res.send(`
     <Response>
       <Connect>
-        <Stream url="wss://nodejs-production-8425.up.railway.app/stream" />
+        <Stream url="wss://voice-project-production-8fea.up.railway.app" />
       </Connect>
     </Response>
   `);
