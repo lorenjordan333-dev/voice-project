@@ -383,12 +383,16 @@ wss.on("connection", (ws) => {
       type: "response.create",
       response: {
         modalities: ["audio"],
-        instructions: "Say: Locksmith services, hi, this is Kelly, how can I help?"
+        instructions: "Say: Hello, this is Kelly from locksmith services, how can I help you?"
       }
     }));
 
     openaiWs.send(JSON.stringify({
-      type: "input_audio_buffer.commit"
+      type: "response.create",
+      response: {
+        modalities: ["audio"],
+        instructions: "Say: Locksmith services, hi, this is Kelly, how can I help?"
+      }
     }));
 
     // Immediately after `session.update`, force the first spoken response.
