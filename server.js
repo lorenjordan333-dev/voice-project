@@ -14,6 +14,7 @@ app.post("/voice", (req, res) => {
 
   res.send(`
     <Response>
+      <Say>Please hold.</Say>
       <Connect>
         <Stream url="wss://${req.headers.host}/stream" />
       </Connect>
@@ -36,7 +37,6 @@ wss.on("connection", (ws) => {
   function detect(text) {
     const t = text.toLowerCase();
 
-    // SERVICE
     if (t.includes("locked out")) systemState.service = "lockout";
 
     if (
@@ -47,17 +47,14 @@ wss.on("connection", (ws) => {
       systemState.service = "lock_change";
     }
 
-    // LOCK TYPE
     if (t.includes("car")) systemState.lockType = "car";
     if (t.includes("home") || t.includes("house")) systemState.lockType = "home";
     if (t.includes("business")) systemState.lockType = "business";
 
-    // ADDRESS
     if (t.match(/\d+/) && t.length > 8) {
       systemState.address = text;
     }
 
-    // 🔥 FALLBACK FIX (ONLY ADDITION)
     if (systemState.lockType && !systemState.service) {
       systemState.service = "lockout";
     }
@@ -137,7 +134,7 @@ About 20 to 25 minutes.
 ENDING:
 Do not end the conversation unless the customer says goodbye.`,
 
-        voice: "marin",
+        voice: "alloy",
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw",
 
@@ -150,6 +147,10 @@ Do not end the conversation unless the customer says goodbye.`,
     openaiWs.send(JSON.stringify({
       type: "response.create",
     }));
+  });
+
+  openaiWs.on("error", (err) => {
+    console.error("❌ OpenAI WS error:", err.message);
   });
 
   ws.on("message", (msg) => {
