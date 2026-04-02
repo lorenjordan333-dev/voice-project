@@ -1,4 +1,5 @@
 console.log("APP BOOTED");
+console.log("NODE VERSION:", process.version);
 
 const express = require("express");
 const WebSocket = require("ws");
@@ -28,122 +29,45 @@ wss.on("connection", (ws) => {
   console.log("Twilio connected");
 
   let streamSid = null;
+  let callSid = null;
   let openaiReady = false;
   let greetingSent = false;
   let aiSpeaking = false;
 
-  const openaiWs = new WebSocket(
-    "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
-    {
-      headers: {
-        Authorization: "Bearer " + process.env.OPENAI_API_KEY,
-        "OpenAI-Beta": "realtime=v1",
-      },
-    }
-  );
+  let systemState = {
+    service: null,
+    lockType: null,
+    address: null,
+    language: "english",
+    confirmed: false,
+  };
 
-  openaiWs.on("open", () => {
-    console.log("OpenAI WebSocket open, sending session.update");
+  let priceStage = 0;
+  let lastUserText = "";
+  let repeatCount = 0;
 
-    openaiWs.send(JSON.stringify({
-      type: "session.update",
-      session: {
-        voice: "alloy",
-        input_audio_format: "g711_ulaw",
-        output_audio_format: "g711_ulaw",
-      },
-    }));
+  function buildPrompt() {
+    const known = [];
+    const missing = [];
 
-    setTimeout(() => {
-      if (!openaiReady) {
-        openaiReady = true;
-        console.log("OpenAI ready");
-      }
-    }, 500);
-  });
+    if (systemState.service) known.push("service: " + systemState.service);
+    else missing.push("service type");
 
-  openaiWs.on("message", (msg) => {
-    const response = JSON.parse(msg);
+    if (systemState.lockType) known.push("lock type: " + systemState.lockType);
+    else missing.push("lock type");
 
-    if (response.type === "session.created" || response.type === "session.updated") {
-      openaiReady = true;
-      console.log("Session ready");
-    }
+    if (systemState.address) known.push("address: " + systemState.address);
+    else missing.push("address");
 
-    if (response.type === "response.audio.delta" && streamSid && ws.readyState === WebSocket.OPEN) {
-      aiSpeaking = true;
-      ws.send(JSON.stringify({
-        event: "media",
-        streamSid: streamSid,
-        media: { payload: response.delta },
-      }));
-    }
+    const knownStr =
+      known.length > 0
+        ? "You already know: " + known.join(", ") + "."
+        : "You do not know anything yet.";
 
-    if (response.type === "response.done") {
-      aiSpeaking = false;
-      console.log("Response done");
-    }
+    const missingStr =
+      missing.length > 0
+        ? "Still need to get: " + missing.join(", ") + "."
+        : "You have everything you need.";
 
-    if (response.type === "conversation.item.input_audio_transcription.completed") {
-      const text = response.transcript;
-      if (text && text.length > 2) {
-        console.log("USER:", text);
-      }
-    }
-  });
-
-  openaiWs.on("error", (err) => {
-    console.error("OpenAI error:", err.message);
-  });
-
-  openaiWs.on("close", () => {
-    console.log("OpenAI closed");
-    openaiReady = false;
-    if (ws.readyState === WebSocket.OPEN) ws.close();
-  });
-
-  ws.on("message", (msg) => {
-    let data;
-    try {
-      data = JSON.parse(typeof msg === "string" ? msg : msg.toString());
-    } catch (e) {
-      return;
-    }
-
-    if (data.event === "start") {
-      streamSid = data.start && data.start.streamSid;
-      console.log("Stream started, streamSid:", streamSid);
-      
-      if (openaiReady && !greetingSent) {
-        greetingSent = true;
-        console.log("Sending greeting");
-        openaiWs.send(JSON.stringify({ type: "response.create" }));
-      }
-      return;
-    }
-
-    if (data.event === "media" && openaiReady && openaiWs.readyState === WebSocket.OPEN) {
-      const payload = data.media && data.media.payload;
-      if (payload) {
-        openaiWs.send(JSON.stringify({
-          type: "input_audio_buffer.append",
-          audio: payload,
-        }));
-      }
-    }
-  });
-
-  ws.on("close", () => {
-    console.log("Twilio closed");
-    if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close();
-  });
-
-  ws.on("error", (err) => {
-    console.error("Twilio error:", err.message);
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
-});
+    return (
+      "You are Kelly, a professional locksmith dispatcher
