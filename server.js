@@ -9,6 +9,7 @@ app.get("/voice", (req, res) => {
   res.send("OK");
 });
 
+// 🔊 TWILIO ENTRY
 app.post("/voice", (req, res) => {
   res.set("Content-Type", "text/xml");
 
@@ -21,41 +22,12 @@ app.post("/voice", (req, res) => {
   `);
 });
 
+// 🔌 SERVER
 const server = require("http").createServer(app);
 const wss = new WebSocket.Server({ server });
 
 wss.on("connection", (ws) => {
   console.log("📞 Twilio connected");
-
-  let systemState = {
-    service: null,
-    lockType: null,
-    address: null,
-  };
-
-  function detect(text) {
-    const t = text.toLowerCase();
-
-    if (t.includes("locked out")) systemState.service = "lockout";
-
-    if (
-      t.includes("lock change") ||
-      t.includes("change lock") ||
-      t.includes("replace lock")
-    ) {
-      systemState.service = "lock_change";
-    }
-
-    if (t.includes("car")) systemState.lockType = "car";
-    if (t.includes("home") || t.includes("house")) systemState.lockType = "home";
-    if (t.includes("business")) systemState.lockType = "business";
-
-    if (t.match(/\d+/) && t.length > 8) {
-      systemState.address = text;
-    }
-
-    console.log("🧠 STATE:", systemState);
-  }
 
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
@@ -68,11 +40,10 @@ wss.on("connection", (ws) => {
   );
 
   let streamSid = null;
+  let audioQueue = [];
   let openaiReady = false;
   let silenceTimer = null;
   let aiSpeaking = false;
-  let hasAudio = false;
-  let lastAiEndTime = 0;
 
   openaiWs.on("open", () => {
     console.log("🤖 OpenAI connected");
@@ -121,6 +92,7 @@ If the customer changes their mind or corrects you, adapt naturally and continue
 PRICE:
 Only if the customer asks:
 Service call is 45 dollars.
+Final price is confirmed on site.
 
 TIME:
 Only if the customer asks:
@@ -132,12 +104,16 @@ Do not end the conversation unless the customer says goodbye.`,
         voice: "marin",
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw",
-
-        input_audio_transcription: {
-          model: "gpt-4o-mini-transcribe"
-        }
       },
     }));
+
+    audioQueue.forEach((chunk) => {
+      openaiWs.send(JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: chunk,
+      }));
+    });
+    audioQueue = [];
 
     openaiWs.send(JSON.stringify({
       type: "response.create",
@@ -153,35 +129,26 @@ Do not end the conversation unless the customer says goodbye.`,
 
     if (data.event === "media") {
 
-      const payload = data.media.payload;
-
-      if (payload && payload.length > 200) {
-        hasAudio = true;
-      }
-
-      if (aiSpeaking && payload && payload.length > 500) {
+      if (aiSpeaking && data.media.payload && data.media.payload.length > 500) {
         openaiWs.send(JSON.stringify({
           type: "response.cancel"
         }));
         aiSpeaking = false;
       }
 
-      if (!openaiReady) return;
+      if (!openaiReady) {
+        audioQueue.push(data.media.payload);
+        return;
+      }
 
       openaiWs.send(JSON.stringify({
         type: "input_audio_buffer.append",
-        audio: payload,
+        audio: data.media.payload,
       }));
 
       if (silenceTimer) clearTimeout(silenceTimer);
 
       silenceTimer = setTimeout(() => {
-
-        if (!hasAudio) return;
-
-        // 🔥 prevent loop after AI just spoke
-        if (Date.now() - lastAiEndTime < 1500) return;
-
         openaiWs.send(JSON.stringify({
           type: "input_audio_buffer.commit"
         }));
@@ -189,9 +156,6 @@ Do not end the conversation unless the customer says goodbye.`,
         openaiWs.send(JSON.stringify({
           type: "response.create"
         }));
-
-        hasAudio = false;
-
       }, 1000);
     }
   });
@@ -204,31 +168,21 @@ Do not end the conversation unless the customer says goodbye.`,
 
       ws.send(JSON.stringify({
         event: "media",
-        streamSid,
-        media: { payload: response.delta },
+        streamSid: streamSid,
+        media: {
+          payload: response.delta,
+        },
       }));
-    }
-
-    if (response.type === "response.completed") {
-      aiSpeaking = false;
-      lastAiEndTime = Date.now(); // 🔥 key fix
-    }
-
-    if (response.type === "conversation.item.input_audio_transcription.completed") {
-      const text = response.transcript;
-
-      if (text && text.length > 2) {
-        console.log("🗣️ USER:", text);
-        detect(text);
-      }
     }
   });
 
   ws.on("close", () => {
+    console.log("❌ Twilio disconnected");
     openaiWs.close();
   });
 
   openaiWs.on("close", () => {
+    console.log("❌ OpenAI disconnected");
     ws.close();
   });
 });
