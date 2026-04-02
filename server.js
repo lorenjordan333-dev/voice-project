@@ -372,7 +372,7 @@ wss.on("connection", (ws) => {
       type: "session.update",
       session: {
         modalities: ["audio"],
-        instructions: "You are Kelly, a professional locksmith dispatcher. Speak naturally and clearly.",
+        instructions: "You are Kelly, a professional locksmith dispatcher.",
         voice: "alloy",
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw"
