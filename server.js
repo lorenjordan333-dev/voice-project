@@ -195,8 +195,11 @@ app.get("/voice", (req, res) => {
   res.send("OK");
 });
 
-app.post("/voice", (req, res) => {
+app.post("/voice", async (req, res) => {
+  console.log("VOICE START");
+
   try {
+    console.log("BEFORE LOGIC");
     console.log("VOICE HIT");
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -207,15 +210,13 @@ app.post("/voice", (req, res) => {
     res.set("Content-Type", "text/xml");
     return res.status(200).send(twiml);
   } catch (err) {
-    console.error("VOICE ERROR:", err);
-
-    const fallbackTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">There was an error.</Say>
-</Response>`;
+    console.error("VOICE CRASH:", err);
 
     res.set("Content-Type", "text/xml");
-    return res.status(200).send(fallbackTwiml);
+    return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">Error happened</Say>
+</Response>`);
   }
 });
 
