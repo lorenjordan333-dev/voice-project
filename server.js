@@ -14,7 +14,6 @@ app.post("/voice", (req, res) => {
 
   res.send(`
     <Response>
-      <Say>Please hold.</Say>
       <Connect>
         <Stream url="wss://${req.headers.host}/stream" />
       </Connect>
@@ -53,10 +52,6 @@ wss.on("connection", (ws) => {
 
     if (t.match(/\d+/) && t.length > 8) {
       systemState.address = text;
-    }
-
-    if (systemState.lockType && !systemState.service) {
-      systemState.service = "lockout";
     }
 
     console.log("🧠 STATE:", systemState);
@@ -134,7 +129,7 @@ About 20 to 25 minutes.
 ENDING:
 Do not end the conversation unless the customer says goodbye.`,
 
-        voice: "alloy",
+        voice: "marin",
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw",
 
@@ -147,10 +142,6 @@ Do not end the conversation unless the customer says goodbye.`,
     openaiWs.send(JSON.stringify({
       type: "response.create",
     }));
-  });
-
-  openaiWs.on("error", (err) => {
-    console.error("❌ OpenAI WS error:", err.message);
   });
 
   ws.on("message", (msg) => {
@@ -188,6 +179,7 @@ Do not end the conversation unless the customer says goodbye.`,
 
         if (!hasAudio) return;
 
+        // 🔥 prevent loop after AI just spoke
         if (Date.now() - lastAiEndTime < 1500) return;
 
         openaiWs.send(JSON.stringify({
@@ -219,7 +211,7 @@ Do not end the conversation unless the customer says goodbye.`,
 
     if (response.type === "response.completed") {
       aiSpeaking = false;
-      lastAiEndTime = Date.now();
+      lastAiEndTime = Date.now(); // 🔥 key fix
     }
 
     if (response.type === "conversation.item.input_audio_transcription.completed") {
