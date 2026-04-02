@@ -1,4 +1,5 @@
 const express = require("express");
+console.log("VOICE DEPLOY TEST");
 
 // --- Production-Grade Voice Assistant Components ---
 
