@@ -1,5 +1,7 @@
+console.log("APP BOOTED");
+console.log("NODE VERSION:", process.version);
+
 const express = require("express");
-console.log("VOICE DEPLOY TEST");
 
 // --- Production-Grade Voice Assistant Components ---
 
