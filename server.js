@@ -533,17 +533,20 @@ wss.on("connection", (ws) => {
 
       const payload = response.delta;
       if (!payload) return;
-      // Twilio requires a valid streamSid on every `media` message.
+
       if (!streamSid) {
+        console.log("⚠️ No streamSid yet, buffering audio");
         outboundAudioDeltas.push(payload);
         return;
       }
+
+      console.log("🔊 Sending audio delta to Twilio, streamSid:", streamSid);
 
       ws.send(JSON.stringify({
         event: "media",
         streamSid: streamSid,
         media: {
-          payload: response.delta
+          payload: payload
         }
       }));
     }
