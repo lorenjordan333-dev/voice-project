@@ -288,6 +288,9 @@ wss.on("connection", (ws) => {
   let audioBuffer = [];
 
   let streamSid = null;
+  // Queue OpenAI audio deltas until Twilio provides `start.streamSid`.
+  // Otherwise Twilio will ignore media messages sent with a null/invalid streamSid.
+  let outboundAudioDeltas = [];
   let aiSpeaking = false;
   let hasAudio = false;
   let silenceTimer = null;
@@ -483,6 +486,19 @@ Do not end the conversation unless the customer says goodbye.`,
       console.log("Stream started");
       if (data.start && data.start.streamSid) {
         streamSid = data.start.streamSid;
+        // Flush any OpenAI audio deltas that arrived before Twilio's streamSid was set.
+        if (outboundAudioDeltas.length) {
+          for (const payload of outboundAudioDeltas) {
+            ws.send(
+              JSON.stringify({
+                event: "media",
+                streamSid,
+                media: { payload },
+              })
+            );
+          }
+          outboundAudioDeltas = [];
+        }
       }
       if (!openaiReady) {
         console.log("Waiting for OpenAI...");
@@ -558,10 +574,18 @@ Do not end the conversation unless the customer says goodbye.`,
     if (response.type === "response.audio.delta") {
       aiSpeaking = true;
 
+      const payload = response.delta;
+      if (!payload) return;
+      // Twilio requires a valid streamSid on every `media` message.
+      if (!streamSid) {
+        outboundAudioDeltas.push(payload);
+        return;
+      }
+
       ws.send(JSON.stringify({
         event: "media",
         streamSid,
-        media: { payload: response.delta },
+        media: { payload },
       }));
     }
 
