@@ -195,20 +195,17 @@ app.get("/voice", (req, res) => {
 });
 
 app.post("/voice", (req, res) => {
-  console.log("🔥 TWILIO HIT /voice");
+  console.log("VOICE HIT", req.headers);
+
+  const host =
+    req.headers["x-forwarded-host"] ||
+    req.headers.host ||
+    "voice-project-production-8fea.up.railway.app";
+
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Connect><Stream url="wss://${host}/stream" /></Connect></Response>`;
+
   res.set("Content-Type", "text/xml");
-
-  res.send(`
-    <Response>
-      <Say>Connecting you now</Say>
-      <Pause length="1"/>
-      <Connect>
-        <Stream url="wss://voice-project-production-8fea.up.railway.app/stream" />
-      </Connect>
-    </Response>
-    `);
-
-  
+  res.status(200).send(twiml);
 });
 
 const server = http.createServer(app);
