@@ -6,11 +6,9 @@ const WebSocket = require("ws");
 require("dotenv").config();
 const http = require("http");
 
-// --- Production-Grade Voice Assistant Components ---
-
 class StateManager {
   constructor() {
-    this.state = "LISTENING"; // LISTENING, THINKING, SPEAKING
+    this.state = "LISTENING";
     this.lastStateChange = Date.now();
   }
 
@@ -168,11 +166,11 @@ class VoiceController {
     if (!c.service) {
       return "Thank you for calling. What kind of lock or service do you need?";
     } else if (!c.address) {
-      return `Sure, I can help with your ${c.service}. Can you tell me the address, please?`;
+      return "Sure, I can help with that. Can you tell me the address, please?";
     } else if (!c.confirmed) {
-      return `Just to confirm, is the address ${c.address}?`;
+      return "Just to confirm, is the address " + c.address + "?";
     } else {
-      return `Thank you. A technician will be dispatched to ${c.address} for your ${c.service}. Is there anything else I can help you with?`;
+      return "Thank you. A technician will be dispatched to " + c.address + ". Is there anything else I can help you with?";
     }
   }
 
@@ -195,6 +193,7 @@ class VoiceController {
 }
 
 const app = express();
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.get("/voice", (req, res) => {
@@ -209,12 +208,7 @@ app.post("/voice", (req, res) => {
     req.headers.host ||
     "voice-project-production-3574.up.railway.app";
 
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="wss://${host}/stream" />
-  </Connect>
-</Response>`;
+  const twiml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Response>\n  <Connect>\n    <Stream url=\"wss://" + host + "/stream\" />\n  </Connect>\n</Response>";
 
   res.set("Content-Type", "text/xml");
   res.status(200).send(twiml);
@@ -224,7 +218,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/stream" });
 
 wss.on("connection", (ws) => {
-  console.log("📞 Twilio connected");
+  console.log("Twilio connected");
 
   let systemState = {
     service: null,
@@ -282,14 +276,14 @@ wss.on("connection", (ws) => {
       systemState.address = text;
     }
 
-    console.log("🧠 STATE:", systemState);
+    console.log("STATE:", systemState);
   }
 
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
     {
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: "Bearer " + process.env.OPENAI_API_KEY,
         "OpenAI-Beta": "realtime=v1",
       },
     }
@@ -298,7 +292,6 @@ wss.on("connection", (ws) => {
   let openaiReady = false;
   let greetingSent = false;
   let streamSid = null;
-  let outboundAudioDeltas = [];
   let aiSpeaking = false;
   let hasAudio = false;
   let silenceTimer = null;
@@ -328,7 +321,7 @@ wss.on("connection", (ws) => {
           !voiceController.conversationManager.confirmed)
       ) {
         nextText = voiceController.conversationManager.address
-          ? `Just to confirm, is the address ${voiceController.conversationManager.address}?`
+          ? "Just to confirm, is the address " + voiceController.conversationManager.address + "?"
           : "Before I send a technician, can I have the full address please?";
       }
 
@@ -342,6 +335,8 @@ wss.on("connection", (ws) => {
       voiceController.currentlySpeaking = true;
       aiResponseInFlight = true;
       voiceController.responseController.markSent(nextText);
+
+      console.log("Sending to OpenAI:", nextText);
 
       openaiWs.send(
         JSON.stringify({
@@ -359,7 +354,7 @@ wss.on("connection", (ws) => {
     if (!openaiReady || !streamSid || greetingSent) return;
 
     greetingSent = true;
-    console.log("🔥 GREETING FIRED");
+    console.log("GREETING FIRED");
 
     aiResponseInFlight = true;
     aiSpeaking = true;
@@ -371,23 +366,21 @@ wss.on("connection", (ws) => {
         type: "response.create",
         response: {
           modalities: ["audio"],
-          instructions:
-            "Say exactly: Locksmith services, hi, this is Kelly, how can I help?",
+          instructions: "Say exactly: Locksmith services, hi, this is Kelly, how can I help?",
         },
       })
     );
   }
 
   openaiWs.on("open", () => {
-    console.log("🤖 OpenAI connected");
+    console.log("OpenAI WebSocket open, sending session.update");
 
     openaiWs.send(
       JSON.stringify({
         type: "session.update",
         session: {
           modalities: ["audio"],
-          instructions:
-            "You are Kelly, a professional locksmith dispatcher. Be calm, short, natural, and wait for the caller to finish. Never interrupt. Ask one simple question at a time. Only send a technician after the address is confirmed. If the user asks about price, answer clearly and briefly without inventing prices.",
+          instructions: "You are Kelly, a professional locksmith dispatcher. Be calm, short, natural, and wait for the caller to finish. Never interrupt. Ask one simple question at a time. Only send a technician after the address is confirmed. If the user asks about price, answer clearly and briefly without inventing prices.",
           voice: "verse",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
@@ -397,6 +390,14 @@ wss.on("connection", (ws) => {
         },
       })
     );
+
+    setTimeout(() => {
+      if (!openaiReady) {
+        openaiReady = true;
+        console.log("OpenAI session ready");
+        tryStartGreeting();
+      }
+    }, 1000);
   });
 
   ws.on("message", (msg) => {
@@ -404,7 +405,7 @@ wss.on("connection", (ws) => {
     try {
       data = JSON.parse(typeof msg === "string" ? msg : msg.toString());
     } catch (e) {
-      console.error("Twilio WS: invalid JSON message", e.message);
+      console.error("Invalid JSON from Twilio:", e.message);
       return;
     }
 
@@ -415,6 +416,7 @@ wss.on("connection", (ws) => {
 
       if (data.start && data.start.streamSid) {
         streamSid = data.start.streamSid;
+        console.log("StreamSid:", streamSid);
       }
 
       tryStartGreeting();
@@ -425,7 +427,7 @@ wss.on("connection", (ws) => {
       console.log("Stream stopped");
 
       if (silenceTimer) clearTimeout(silenceTimer);
-      silenceTimer = null;
+      if (pendingAssistantTimeout) clearTimeout(pendingAssistantTimeout);
       return;
     }
 
@@ -477,40 +479,36 @@ wss.on("connection", (ws) => {
   openaiWs.on("message", (msg) => {
     const response = JSON.parse(msg);
 
-    if (response.type === "session.created") {
+    if (response.type === "session.created" || response.type === "session.updated") {
       openaiReady = true;
-      console.log("✅ OpenAI session created");
+      console.log("OpenAI session active");
       tryStartGreeting();
     }
 
     if (response.type === "response.audio.delta") {
-      aiSpeaking = true;
-
       const payload = response.delta;
-      if (!payload) return;
+      if (!payload || !streamSid || ws.readyState !== WebSocket.OPEN) return;
 
-      if (!streamSid) {
-        outboundAudioDeltas.push(payload);
-        return;
-      }
+      aiSpeaking = true;
 
       ws.send(
         JSON.stringify({
           event: "media",
-          streamSid,
+          streamSid: streamSid,
           media: {
-            payload,
+            payload: payload,
           },
         })
       );
     }
 
-    if (response.type === "response.completed") {
+    if (response.type === "response.done") {
       aiSpeaking = false;
       lastAiEndTime = Date.now();
       aiResponseInFlight = false;
       voiceController.currentlySpeaking = false;
       voiceController.stateManager.setState("LISTENING");
+      console.log("Response done, AI stopped speaking");
     }
 
     if (
@@ -519,7 +517,7 @@ wss.on("connection", (ws) => {
       const text = response.transcript;
 
       if (text && text.length > 1) {
-        console.log("🗣️ USER:", text);
+        console.log("USER:", text);
 
         detect(text);
         voiceController.receiveUserText(text);
@@ -536,14 +534,11 @@ wss.on("connection", (ws) => {
           let reply = "";
 
           if (priceStage === 1) {
-            reply =
-              "The technician will give you the exact price on site depending on the lock.";
+            reply = "The technician will give you the exact price on site depending on the lock.";
           } else if (priceStage === 2) {
-            reply =
-              "There is a 45 dollar service call, and the technician will confirm the exact price on site depending on the lock.";
+            reply = "There is a 45 dollar service call, and the technician will confirm the exact price on site depending on the lock.";
           } else {
-            reply =
-              "It is a 45 dollar service call, and the job usually starts from 45 depending on the situation.";
+            reply = "It is a 45 dollar service call, and the job usually starts from 45 depending on the situation.";
           }
 
           scheduleAssistantResponse(reply);
@@ -593,5 +588,5 @@ wss.on("connection", (ws) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("🚀 Server running on port " + PORT);
+  console.log("Server running on port " + PORT);
 });
