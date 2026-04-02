@@ -537,8 +537,10 @@ wss.on("connection", (ws) => {
 
       ws.send(JSON.stringify({
         event: "media",
-        streamSid,
-        media: { payload },
+        streamSid: streamSid,
+        media: {
+          payload: response.delta
+        }
       }));
     }
 
