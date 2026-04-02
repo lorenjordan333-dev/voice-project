@@ -45,6 +45,9 @@ wss.on("connection", (ws) => {
   let silenceTimer = null;
   let aiSpeaking = false;
 
+  // 🔥 NEW: track if user actually spoke
+  let hasAudio = false;
+
   openaiWs.on("open", () => {
     console.log("🤖 OpenAI connected");
 
@@ -129,6 +132,11 @@ Do not end the conversation unless the customer says goodbye.`,
 
     if (data.event === "media") {
 
+      // 🔥 mark that user spoke
+      if (data.media.payload && data.media.payload.length > 200) {
+        hasAudio = true;
+      }
+
       if (aiSpeaking && data.media.payload && data.media.payload.length > 500) {
         openaiWs.send(JSON.stringify({
           type: "response.cancel"
@@ -149,6 +157,10 @@ Do not end the conversation unless the customer says goodbye.`,
       if (silenceTimer) clearTimeout(silenceTimer);
 
       silenceTimer = setTimeout(() => {
+
+        // 🔥 ONLY commit if user actually spoke
+        if (!hasAudio) return;
+
         openaiWs.send(JSON.stringify({
           type: "input_audio_buffer.commit"
         }));
@@ -156,6 +168,10 @@ Do not end the conversation unless the customer says goodbye.`,
         openaiWs.send(JSON.stringify({
           type: "response.create"
         }));
+
+        // reset
+        hasAudio = false;
+
       }, 1000);
     }
   });
@@ -173,6 +189,10 @@ Do not end the conversation unless the customer says goodbye.`,
           payload: response.delta,
         },
       }));
+    }
+
+    if (response.type === "response.completed") {
+      aiSpeaking = false;
     }
   });
 
