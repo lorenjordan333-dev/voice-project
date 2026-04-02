@@ -196,17 +196,27 @@ app.get("/voice", (req, res) => {
 });
 
 app.post("/voice", (req, res) => {
-  console.log("VOICE HIT", req.headers);
+  try {
+    console.log("VOICE HIT");
 
-  const host =
-    req.headers["x-forwarded-host"] ||
-    req.headers.host ||
-    "voice-project-production-8fea.up.railway.app";
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">Hello, this is the voice assistant working.</Say>
+</Response>`;
 
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Connect><Stream url="wss://${host}/stream" /></Connect></Response>`;
+    res.set("Content-Type", "text/xml");
+    return res.status(200).send(twiml);
+  } catch (err) {
+    console.error("VOICE ERROR:", err);
 
-  res.set("Content-Type", "text/xml");
-  res.status(200).send(twiml);
+    const fallbackTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">There was an error.</Say>
+</Response>`;
+
+    res.set("Content-Type", "text/xml");
+    return res.status(200).send(fallbackTwiml);
+  }
 });
 
 const server = http.createServer(app);
