@@ -201,7 +201,6 @@ app.get("/voice", (req, res) => {
   res.send("OK");
 });
 
-// IMPORTANT: stream the call, do NOT use <Say> here
 app.post("/voice", (req, res) => {
   console.log("VOICE HIT");
 
@@ -298,49 +297,16 @@ wss.on("connection", (ws) => {
 
   let openaiReady = false;
   let greetingSent = false;
-  let audioBuffer = [];
-  let outboundAudioDeltas = [];
   let streamSid = null;
+  let outboundAudioDeltas = [];
   let aiSpeaking = false;
   let hasAudio = false;
   let silenceTimer = null;
   let lastAiEndTime = 0;
-  let lastAiText = "";
   let pendingAssistantTimeout = null;
   let aiResponseInFlight = false;
 
   const voiceController = new VoiceController();
-
-  function sendImmediateAssistantResponse(nextText) {
-    if (openaiWs.readyState !== WebSocket.OPEN) return;
-    if (pendingAssistantTimeout) clearTimeout(pendingAssistantTimeout);
-
-    voiceController.stateManager.setState("SPEAKING");
-    voiceController.currentlySpeaking = true;
-    aiResponseInFlight = true;
-    voiceController.responseController.markSent(nextText);
-
-    openaiWs.send(
-      JSON.stringify({
-        type: "response.create",
-        response: {
-          modalities: ["audio"],
-          instructions: nextText,
-        },
-      })
-    );
-  }
-
-  function tryStartGreeting() {
-    if (!openaiReady || !streamSid || greetingSent) return;
-
-    greetingSent = true;
-    console.log("🔥 GREETING FIRED");
-
-    sendImmediateAssistantResponse(
-      "Locksmith services, hi, this is Kelly, how can I help?"
-    );
-  }
 
   function scheduleAssistantResponse(forcedText) {
     if (pendingAssistantTimeout) clearTimeout(pendingAssistantTimeout);
@@ -389,6 +355,29 @@ wss.on("connection", (ws) => {
     }, delayMs);
   }
 
+  function tryStartGreeting() {
+    if (!openaiReady || !streamSid || greetingSent) return;
+
+    greetingSent = true;
+    console.log("🔥 GREETING FIRED");
+
+    aiResponseInFlight = true;
+    aiSpeaking = true;
+    voiceController.currentlySpeaking = true;
+    voiceController.stateManager.setState("SPEAKING");
+
+    openaiWs.send(
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["audio"],
+          instructions:
+            "Say exactly: Locksmith services, hi, this is Kelly, how can I help?",
+        },
+      })
+    );
+  }
+
   openaiWs.on("open", () => {
     console.log("🤖 OpenAI connected");
 
@@ -426,19 +415,6 @@ wss.on("connection", (ws) => {
 
       if (data.start && data.start.streamSid) {
         streamSid = data.start.streamSid;
-
-        if (outboundAudioDeltas.length) {
-          for (const payload of outboundAudioDeltas) {
-            ws.send(
-              JSON.stringify({
-                event: "media",
-                streamSid,
-                media: { payload },
-              })
-            );
-          }
-          outboundAudioDeltas = [];
-        }
       }
 
       tryStartGreeting();
@@ -457,12 +433,7 @@ wss.on("connection", (ws) => {
       const payload = data.media && data.media.payload;
       if (!payload) return;
 
-      if (!openaiReady) {
-        audioBuffer.push(payload);
-        return;
-      }
-
-      if (openaiWs.readyState !== WebSocket.OPEN) return;
+      if (!openaiReady || openaiWs.readyState !== WebSocket.OPEN) return;
 
       if (payload.length > 200) {
         hasAudio = true;
@@ -509,19 +480,6 @@ wss.on("connection", (ws) => {
     if (response.type === "session.created") {
       openaiReady = true;
       console.log("✅ OpenAI session created");
-
-      if (audioBuffer.length) {
-        for (const payload of audioBuffer) {
-          openaiWs.send(
-            JSON.stringify({
-              type: "input_audio_buffer.append",
-              audio: payload,
-            })
-          );
-        }
-        audioBuffer = [];
-      }
-
       tryStartGreeting();
     }
 
@@ -547,12 +505,7 @@ wss.on("connection", (ws) => {
       );
     }
 
-    if (response.type === "response.output_text.delta") {
-      lastAiText += response.delta;
-    }
-
     if (response.type === "response.completed") {
-      lastAiText = "";
       aiSpeaking = false;
       lastAiEndTime = Date.now();
       aiResponseInFlight = false;
@@ -560,7 +513,9 @@ wss.on("connection", (ws) => {
       voiceController.stateManager.setState("LISTENING");
     }
 
-    if (response.type === "conversation.item.input_audio_transcription.completed") {
+    if (
+      response.type === "conversation.item.input_audio_transcription.completed"
+    ) {
       const text = response.transcript;
 
       if (text && text.length > 1) {
@@ -609,6 +564,7 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("Twilio WS closed");
+
     if (pendingAssistantTimeout) clearTimeout(pendingAssistantTimeout);
     if (silenceTimer) clearTimeout(silenceTimer);
 
