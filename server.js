@@ -42,9 +42,6 @@ wss.on("connection", (ws) => {
   let openaiReady = false;
   let greetingSent = false;
   let aiSpeaking = false;
-  let hasAudio = false;
-  let silenceTimer = null;
-  let lastAiEndTime = 0;
 
   let systemState = {
     service: null,
@@ -63,10 +60,10 @@ wss.on("connection", (ws) => {
     const missing = [];
 
     if (systemState.service) known.push("service: " + systemState.service);
-    else missing.push("service type (lockout, lock change, etc.)");
+    else missing.push("service type");
 
     if (systemState.lockType) known.push("lock type: " + systemState.lockType);
-    else missing.push("lock type (car, home, business)");
+    else missing.push("lock type");
 
     if (systemState.address) known.push("address: " + systemState.address);
     else missing.push("address");
@@ -81,36 +78,16 @@ wss.on("connection", (ws) => {
         ? "Still need to get: " + missing.join(", ") + "."
         : "You have everything you need.";
 
-    const completedStr =
-      systemState.service && systemState.address && systemState.confirmed
-        ? "All information collected. Confirm the address, then tell the customer a technician is on the way."
-        : "Keep the conversation natural. Do not rush. Get the missing info one step at a time.";
-
     return (
-      "You are Kelly, a professional locksmith dispatcher.\n\n" +
-      "START:\n" +
-      'Always greet with: "Locksmith services, hi, this is Kelly, how can I help?"\n\n' +
-      "STYLE:\n" +
-      "Be natural, calm, and human.\n" +
-      "Speak in short sentences.\n" +
-      "Listen more than you talk.\n" +
-      "Never interrupt the customer.\n\n" +
-      "LANGUAGE:\n" +
-      "If the customer speaks French, switch fully to French and stay in French.\n" +
-      "If the customer speaks English, stay in English.\n\n" +
-      "CURRENT CALL STATE:\n" +
+      "You are Kelly, a professional locksmith dispatcher. " +
+      "Always greet with: Locksmith services, hi, this is Kelly, how can I help? " +
+      "Be natural, calm, and human. Speak in short sentences. Listen more than you talk. " +
+      "Never interrupt the customer. " +
+      "If the customer speaks French, switch fully to French. " +
       knownStr +
-      "\n" +
+      " " +
       missingStr +
-      "\n" +
-      completedStr +
-      "\n\n" +
-      "PRICE (only if asked):\n" +
-      "Service call is 45 dollars.\n\n" +
-      "TIME (only if asked):\n" +
-      "About 20 to 25 minutes.\n\n" +
-      "ENDING:\n" +
-      "Do not end the conversation unless the customer says goodbye."
+      " Keep the conversation natural. Do not rush. Get the missing info one step at a time."
     );
   }
 
@@ -120,32 +97,33 @@ wss.on("connection", (ws) => {
     if (t.includes("locked out") || t.includes("locked outside") || t.includes("cant get in")) {
       systemState.service = "lockout";
     }
-    if (t.includes("lock change") || t.includes("change lock") || t.includes("replace lock") || t.includes("rekey")) {
+    if (t.includes("lock change") || t.includes("change lock") || t.includes("replace lock")) {
       systemState.service = "lock_change";
     }
-    if (t.includes("key") && t.includes("stuck")) systemState.service = "key_extraction";
-    if (t.includes("ignition")) systemState.service = "ignition";
+    if (t.includes("key") && t.includes("stuck")) {
+      systemState.service = "key_extraction";
+    }
 
-    if (t.includes("car") || t.includes("vehicle") || t.includes("truck") || t.includes("auto")) {
+    if (t.includes("car") || t.includes("vehicle") || t.includes("truck")) {
       systemState.lockType = "car";
     }
-    if (t.includes("home") || t.includes("house") || t.includes("apartment") || t.includes("condo")) {
+    if (t.includes("home") || t.includes("house") || t.includes("apartment")) {
       systemState.lockType = "home";
     }
-    if (t.includes("office") || t.includes("business") || t.includes("store") || t.includes("shop")) {
+    if (t.includes("business") || t.includes("office")) {
       systemState.lockType = "business";
     }
 
     const addressMatch = text.match(/\b\d+\s+[a-zA-Z]{2,}/);
-    if (addressMatch && text.length > 10 && !t.includes("phone") && !t.includes("number")) {
+    if (addressMatch && text.length > 10) {
       systemState.address = text.trim();
     }
 
-    if (t.includes("bonjour") || t.includes("aide") || t.includes("porte") || t.includes("maison") || t.includes("voiture")) {
+    if (t.includes("bonjour") || t.includes("porte") || t.includes("maison")) {
       systemState.language = "french";
     }
 
-    if (/yes|correct|that.?s right|confirm/i.test(t) && systemState.address) {
+    if (/yes|correct|confirm/i.test(t) && systemState.address) {
       systemState.confirmed = true;
     }
 
@@ -158,32 +136,21 @@ wss.on("connection", (ws) => {
 
   function isPriceQuestion(text) {
     const t = text.toLowerCase();
-    return t.includes("price") || t.includes("cost") || t.includes("how much") || t.includes("average");
-  }
-
-  function detectConfusion(text) {
-    if (text === lastUserText) {
-      repeatCount++;
-    } else {
-      repeatCount = 0;
-    }
-    lastUserText = text;
-    if (repeatCount >= 1) return true;
-    if (text.length < 3) return true;
-    return false;
+    return t.includes("price") || t.includes("cost") || t.includes("how much");
   }
 
   function updateSession() {
     if (!openaiReady || openaiWs.readyState !== WebSocket.OPEN) return;
-    openaiWs.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          instructions: buildPrompt(),
-        },
-      })
-    );
-    console.log("Session updated with new state");
+
+    const msg = JSON.stringify({
+      type: "session.update",
+      session: {
+        instructions: buildPrompt(),
+      },
+    });
+
+    console.log("Updating session instructions");
+    openaiWs.send(msg);
   }
 
   function tryGreeting() {
@@ -203,30 +170,39 @@ wss.on("connection", (ws) => {
     }
   );
 
-  openaiWs.on("open", () => {
-    console.log("OpenAI WebSocket open");
+  let sessionTimeout = null;
 
-    openaiWs.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          modalities: ["text", "audio"],
-          instructions: buildPrompt(),
-          voice: "verse",
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
-          input_audio_transcription: {
-            model: "gpt-4o-mini-transcribe",
-          },
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 500,
-          },
+  openaiWs.on("open", () => {
+    console.log("OpenAI WebSocket open, sending session.update");
+
+    const sessionPayload = {
+      type: "session.update",
+      session: {
+        modalities: ["text", "audio"],
+        instructions: buildPrompt(),
+        voice: "alloy",
+        input_audio_format: "g711_ulaw",
+        output_audio_format: "g711_ulaw",
+        input_audio_transcription: {
+          model: "gpt-4o-mini-transcribe",
         },
-      })
-    );
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+        },
+      },
+    };
+
+    console.log("Session payload keys:", Object.keys(sessionPayload.session));
+    openaiWs.send(JSON.stringify(sessionPayload));
+
+    sessionTimeout = setTimeout(() => {
+      if (!openaiReady) {
+        console.error("TIMEOUT: OpenAI session not ready after 5 seconds");
+      }
+    }, 5000);
   });
 
   openaiWs.on("message", (msg) => {
@@ -234,38 +210,39 @@ wss.on("connection", (ws) => {
     try {
       response = JSON.parse(msg);
     } catch (e) {
+      console.error("Failed to parse OpenAI message:", e.message);
       return;
     }
 
+    console.log("OpenAI event:", response.type);
+
     if (response.type === "session.created" || response.type === "session.updated") {
       openaiReady = true;
+      if (sessionTimeout) clearTimeout(sessionTimeout);
       console.log("OpenAI session ready");
       tryGreeting();
     }
 
     if (response.type === "response.audio.delta") {
-      const payload = response.delta;
-      if (!payload || !streamSid || ws.readyState !== WebSocket.OPEN) return;
+      if (!response.delta || !streamSid || ws.readyState !== WebSocket.OPEN) return;
 
       aiSpeaking = true;
       ws.send(
         JSON.stringify({
           event: "media",
           streamSid: streamSid,
-          media: { payload: payload },
+          media: { payload: response.delta },
         })
       );
     }
 
     if (response.type === "response.audio.done") {
       aiSpeaking = false;
-      lastAiEndTime = Date.now();
       console.log("AI audio done");
     }
 
     if (response.type === "response.done") {
       aiSpeaking = false;
-      lastAiEndTime = Date.now();
       console.log("Response done");
     }
 
@@ -280,61 +257,21 @@ wss.on("connection", (ws) => {
 
       if (isPriceQuestion(text)) {
         priceStage++;
-        let reply = "";
-        if (priceStage === 1) {
-          reply = "There is a 45 dollar service call, and the technician will confirm the exact price on site.";
-        } else {
-          reply = "It is a 45 dollar service call, and the job usually starts from 45 depending on the situation.";
-        }
-
-        openaiWs.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "user",
-              content: [{ type: "input_text", text: text }],
-            },
-          })
-        );
-
-        openaiWs.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "assistant",
-              content: [{ type: "text", text: reply }],
-            },
-          })
-        );
-
-        openaiWs.send(JSON.stringify({ type: "response.create" }));
-        return;
-      }
-
-      if (detectConfusion(text)) {
-        openaiWs.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "user",
-              content: [{ type: "input_text", text: text }],
-            },
-          })
-        );
-        openaiWs.send(JSON.stringify({ type: "response.create" }));
+        console.log("Price question, stage:", priceStage);
         return;
       }
     }
 
     if (response.type === "input_audio_buffer.speech_started") {
       if (aiSpeaking) {
+        console.log("User interrupted, cancelling response");
         openaiWs.send(JSON.stringify({ type: "response.cancel" }));
         aiSpeaking = false;
-        console.log("User interrupted, cancelled AI response");
       }
+    }
+
+    if (response.type === "error") {
+      console.error("OpenAI error:", response.error);
     }
   });
 
@@ -357,7 +294,6 @@ wss.on("connection", (ws) => {
 
     if (data.event === "stop") {
       console.log("Stream stopped");
-      if (silenceTimer) clearTimeout(silenceTimer);
       return;
     }
 
@@ -377,7 +313,6 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("Twilio WS closed");
-    if (silenceTimer) clearTimeout(silenceTimer);
     if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close();
   });
 
