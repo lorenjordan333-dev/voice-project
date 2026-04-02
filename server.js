@@ -435,8 +435,24 @@ Do not end the conversation unless the customer says goodbye.`,
       },
     }));
 
-    sendImmediateAssistantResponse(
-      "Locksmith services, hi, this is Kelly, how can I help?"
+    // Immediately after `session.update`, force the first spoken response.
+    // This must not wait for any user audio, otherwise Twilio may disconnect.
+    voiceController.stateManager.setState("SPEAKING");
+    voiceController.currentlySpeaking = true;
+    aiResponseInFlight = true;
+    voiceController.responseController.markSent(
+      "Say: Hello, this is Kelly from locksmith services, how can I help you?"
+    );
+
+    openaiWs.send(
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["audio"],
+          instructions:
+            "Say: Hello, this is Kelly from locksmith services, how can I help you?",
+        },
+      })
     );
 
     openaiReady = true;
