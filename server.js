@@ -387,6 +387,10 @@ wss.on("connection", (ws) => {
       }
     }));
 
+    openaiWs.send(JSON.stringify({
+      type: "input_audio_buffer.commit"
+    }));
+
     // Immediately after `session.update`, force the first spoken response.
     // This must not wait for any user audio, otherwise Twilio may disconnect.
     voiceController.stateManager.setState("SPEAKING");
