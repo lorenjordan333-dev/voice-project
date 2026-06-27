@@ -31,7 +31,7 @@ class StateManager {
 }
 
 class ConversationManager {
-  constructor
+  constructor() {
     this.reset();
   }
 
