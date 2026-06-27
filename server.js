@@ -25,7 +25,7 @@ class StateManager {
     return this.state === state;
   }
 
-  reset
+  reset() {
     this.setState("LISTENING");
   }
 }
