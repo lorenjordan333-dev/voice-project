@@ -9,7 +9,7 @@ const http = require("http");
 // --- Production-Grade Voice Assistant Components ---
 
 class StateManager {
-  constructor() {
+  constructor
     this.state = "LISTENING"; // LISTENING, THINKING, SPEAKING
     this.lastStateChange = Date.now();
   }
